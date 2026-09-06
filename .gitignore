@@ -67,3 +67,4 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.agent*.md
