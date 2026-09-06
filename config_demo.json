@@ -1,0 +1,16 @@
+{
+  "display": "overlay",
+  "transcriber": "moonshine",
+  "language": "en",
+  "model_arch": "TINY_STREAMING",
+  "input_file": "e2e_speech.wav",
+  "target_language": "en",
+  "overlay": {
+    "x": 200,
+    "y": 100,
+    "width": 700,
+    "height": 150,
+    "opacity": 0.9,
+    "max_lines": 5
+  }
+}

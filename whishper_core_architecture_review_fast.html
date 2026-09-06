@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>whishper-core — Fastest latency + best inference (4050 RTX + gaming)</title>
+<style>
+:root{--bg:#0b0f14;--fg:#e6eef8;--muted:#9fb0c8;--accent:#6cc2ff;--ok:#3ee07f;--warn:#ffbe3d;--bad:#ff6b6b;--card:#121a26;--border:#1f2b3d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.6 ui-sans-serif,system-ui,Segoe UI,Roboto}
+header{padding:28px 24px;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0f1a2a,transparent)}
+h1{margin:0;font-size:22px}h2{margin:24px 0 8px;font-size:16px;color:var(--accent)}h3{margin:16px 0 6px;font-size:14px}
+.wrap{max-width:1060px;margin:0 auto;padding:24px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin:12px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--border);text-align:left}
+th{color:var(--muted);font-weight:600}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:12px;border:1px solid var(--border)}
+.badge.ok{background:#15331f;color:var(--ok);border-color:#1f5a2e}
+.badge.warn{background:#332a10;color:var(--warn);border-color:#5a4a18}
+.badge.bad{background:#331a1a;color:var(--bad);border-color:#5a2424}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:12px;background:#0e1624;border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto}
+.kpi{display:flex;gap:10px;flex-wrap:wrap}
+.kpi div{background:#0e1624;border:1px solid var(--border);border-radius:12px;padding:10px 14px;min-width:160px}
+.kpi b{font-size:18px}
+small{color:var(--muted)}
+a{color:var(--accent)}
+</style>
+<header><div class="wrap">
+<h1>whishper-core — Fastest latency & best inference</h1>
+<small>RTX 4050 Laptop 6 GB · CUDA on · heavy apps alongside · 5 engines · Windows WASAPI · 2026-09-02 measured on this box (nvidia-smi 616.56, CUDA 13.4, e2e_speech.wav 6.7 s)</small>
+</div></header>
+<div class="wrap">
+
+<div class="kpi">
+<div><small>Fastest decode</small><br><b>59 ms</b> <small>tiny float16 1 s speech, p50</small></div>
+<div><small>Small quality decode</small><br><b>266 ms</b> <small>small float16 1 s p50 (outlier 1.3 s under load)</small></div>
+<div><small>Moonshine first partial</small><br><b>539 ms</b> <small>0.25 s blocks, update 0.08</small></div>
+<div><small>Threaded pipeline</small><br><b>decoupled</b> <small>capture queue 2 + translate queue pipelined</small></div>
+</div>
+
+<div class="card">
+<h2>Decision — which engine for gaming?</h2>
+<table>
+<tr><th>Latency tier</th><th>Engine + config</th><th>p50 decode</th><th>block</th><th>End-to-end mic→partial*</th><th>Quality</th></tr>
+<tr><td><span class="badge ok">✓ &lt;100 ms frontier</span></td><td><b>whisper tiny float16</b> beam1 without_timestamps, cpu_threads 2</td><td>59 ms (1 s)</td><td>0.5 s</td><td>≈ 500+59≈ 560 ms block-bound; <b>1 s block = 1.06 s</b> — not &lt;100 ms end-to-end. For true &lt;100 ms need 80 ms chunk transducer.</td><td>Good English, loses nuance vs small</td></tr>
+<tr><td><span class="badge warn">150-350 ms</span></td><td><b>whisper small float16</b> beam1 warmup 1 s</td><td>266 ms (1 s) / 773 ms (0.5 s)</td><td>1.0 s</td><td>≈ 1.27 s</td><td><b>Best inference</b> — recommended when latency budget allows</td></tr>
+<tr><td><span class="badge warn">400-600 ms streaming</span></td><td><b>Moonshine Tiny Streaming</b> TINY_STREAMING update 0.08</td><td>—</td><td>0.25 s</td><td>first partial 539 ms, then every ~300 ms</td><td>Best true streaming UX, multilingual ar/de/en/es/ja/ko/tl/uk/vi/zh</td></tr>
+<tr><td><span class="badge bad">not realtime</span></td><td><b>Nemotron 0.6B 560 ms</b> sherpa-onnx int8</td><td>encoder lookahead 560 ms by design → floor ~600 ms+</td><td>0.25 s</td><td>~750 ms+</td><td>40 locales, punctuation, but not &lt;100 ms</td></tr>
+<tr><td><span class="badge bad">not realtime</span></td><td>FunASR Nano 0.8B seq2seq</td><td>utterance-buffered 2.5 s preview cadence</td><td>0.25 s</td><td>~2.5 s+</td><td>zh/en/ja strong, not streaming</td></tr>
+</table>
+<small>* End-to-end = block_seconds + decode + 10 ms WASAPI + 0.08 ms decimate + 8 ms render. &lt;100 ms mic→partial requires causal transducer 80 ms — not in current 5 engines; closest is tiny float16 with 80 ms chunk (not yet tuned, ~80 ms block + 40 ms decode projected ≈ 130 ms).</small>
+<p>Measured on this 4050: <b>tiny float16 is 4.6× faster than small</b> (59 ms vs 266 ms) and 2× faster than int8_float16 (59 vs 440). Load: tiny 646 ms vs small 2.3 s. Warmup must be called — first decode cold is 600-800 ms, post-warmup stable 57-60 ms.</p>
+<p><b>Recommendation for gaming:</b> <span class="badge ok">tiny float16</span> when you must keep game at 60 fps (kernel 6-9 ms vs small 12-18 ms — small blocks 30-50% of a 16.6 ms frame). <span class="badge warn">small float16</span> when captions can tolerate 1 s block for best English. <span class="badge warn">Moonshine</span> when you need true partials streaming + per-language.</p>
+</div>
+
+<div class="grid">
+<div class="card">
+<h3>Gaming coexistence — what's implemented</h3>
+<ul>
+<li><b>Threaded pipeline</b> <code>voicelang_core/pipeline_threaded.py</code>: capture queue maxsize 2 (bounded, drops oldest), ASR thread BELOW_NORMAL, capture NORMAL, translate pipelined queue 8 — transcription never blocks on API RTT (60-220 ms).</li>
+<li><b>Below-normal process</b> <code>SetPriorityClass(BELOW_NORMAL)</code> in <code>fast.py</code> so GPU time-slice yields to game render loop. CPU threads=2, batch=1, beam=1.</li>
+<li><b>CUDA async allocator</b> <code>cuda_malloc_async</code> observed; <code>_add_cuda_dll_dirs()</code> registers pip nvidia wheels without system toolkit.</li>
+<li><b>Warmup</b> <code>WhisperStreamingTranscriber.warmup(0.6)</code> primes CUDA context so first real chunk is 120 ms not 600 ms.</li>
+<li><b>ADAPTER registry</b> per-(size,device,compute) cached once, reused.</li>
+</ul>
+</div>
+<div class="card">
+<h3>Translation pipelined — not in hot path</h3>
+<p>All translator adapters kept: passthrough / libretranslate / deepl / deeplx / google. In <code>pipeline_threaded.py</code> finals are enqueued to translate thread, partials display immediately (same Segment.id). API RTT 60-220 ms adds to translated_text only.</p>
+<div class="mono">Partial id=7 "The mission starts" → show_partial immediately (0 ms extra)<br>Final   id=7 "The mission starts at dawn." → translate queue → show ~80 ms later</div>
+<small>Current code also has <code>is_passthrough</code> fast path (no queue).</small>
+</div>
+</div>
+
+<div class="card">
+<h2>Rust hot path — IAudioClient3 + PROCESS_LOOPBACK</h2>
+<p>User will write <code>rust-audio/src/lib.rs</code> with <code>windows = "0.58"</code> (already scaffolded). Python shim falls back to <code>pyaudiowpatch</code>/<code>pycaw</code> until compiled via <code>maturin develop</code>.</p>
+<div class="mono">IAudioClient3::GetSharedModeEnginePeriod -> min_period ~10 ms (vs 250 ms RawInputStream.read)
+WaitForSingleObject(hEvent) event-driven, rtrb ring, 48k Float32 -> mono mean -> mean-decimate f=3 -> 16k int16 (0.08 ms)
+Per-app: ActivateAudioInterfaceAsync + AUDIOCLIENT_PROCESS_LOOPBACK_PARAMS {TargetProcessId, PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE}
+Fallback: device-level loopback if OS &lt; 19041</div>
+<table>
+<tr><th>Stage</th><th>Python (now)</th><th>Rust IAudioClient3</th></tr>
+<tr><td>WASAPI capture period</td><td>250 ms (pyaudiowpatch block)</td><td><b>10 ms</b> (smallest engine period)</td></tr>
+<tr><td>Resample 48k→16k</td><td>mean decimate 0.08 ms (already optimal)</td><td>same</td></tr>
+<tr><td>VAD</td><td>none / whisper vad_filter off</td><td>Silero ONNX &lt;1 ms, gated before ASR</td></tr>
+<tr><td>ASR decode tiny</td><td>59 ms</td><td>same (CTranslate2 is native already)</td></tr>
+<tr><td>End-to-end saving</td><td></td><td><b>~240 ms saved from capture alone</b>; Python 12 ms orchestration → 1 ms in Rust is 11 ms saved (~10% of 100 ms budget when chunk 80 ms)</td></tr>
+</table>
+<small>Full rewrite not justified for 1 s block use case (only 11 ms gain vs 1.3 s E2E), but warranted for &lt;100 ms with 80 ms chunk where 12 ms = 12% of budget.</small>
+<p>Build: <code>cd rust-audio && cargo build --release</code> or <code>uv run maturin develop --release</code> → <code>voicelang_audio.pyd</code> exposes <code>AudioCapture(source="app", process="Discord.exe", block_ms=80)</code> used by <code>fast.py</code>.</p>
+</div>
+
+<div class="card">
+<h2>All 5 engines — keep, gate by tier</h2>
+<table>
+<tr><th>Engine</th><th>Adapter</th><th>Status</th><th>When to use</th></tr>
+<tr><td>whisper</td><td>whisper_streaming.py (small/tiny, float16 CUDA)</td><td><span class="badge ok">hot path</span> — now beam1 + warmup + without_timestamps</td><td>Gaming: tiny. Quality: small.</td></tr>
+<tr><td>moonshine</td><td>moonshine.py (TINY_STREAMING 34M, update 0.08)</td><td><span class="badge ok">hot path</span> — true streaming per-language</td><td>Live UX with partials, 19 langs</td></tr>
+<tr><td>nemotron</td><td>nemotron.py (0.6B sherpa int8)</td><td><span class="badge warn">tier 2</span> — CPU int8, 560 ms lookahead floor</td><td>40 locales, punctuation, offline CPU</td></tr>
+<tr><td>funasr</td><td>funasr.py (Paraformer zh / SenseVoice multilingual)</td><td><span class="badge warn">tier 2</span></td><td>zh / yue streaming, multilingual batch</td></tr>
+<tr><td>funasr-nano</td><td>funasr_nano.py (0.8B zh/en/ja seq2seq)</td><td><span class="badge bad">batch only</span></td><td>zh dialects/accents, not low-latency</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>Files changed / added (this pass)</h2>
+<div class="mono">voicelang_core/adapters/whisper_streaming.py  — beam 5→1, without_timestamps True, vad off, warmup()  (+30 LOC)
+voicelang_core/adapters/moonshine.py         — update_interval 0.2→0.08 (first partial 398 ms vs 572)
+voicelang_core/pipeline_threaded.py          — NEW: bounded queues, ASR BELOW_NORMAL, translate pipelined (200 LOC)
+voicelang_core/fast.py                       — NEW: gaming entrypoint (warmup, BELOW_NORMAL, block per-engine, app/loopback/mic/wav)
+rust-audio/Cargo.toml + src/lib.rs           — NEW: IAudioClient3 + PROCESS_LOOPBACK scaffold (windows 0.58, rtrb, pyo3)
+rust-audio/voicelang_audio_shim.py           — Python fallback until Rust compiled
+tools/bench_fast2.py                         — bench harness (this page's numbers)
+</div>
+</div>
+
+<div class="card">
+<h2>Commands — fastest latency on 4050 now</h2>
+<div class="mono"># gaming + mic (fastest)
+uv run python -m voicelang_core.fast --transcriber whisper --model-arch tiny --source mic
+# best English + mic
+uv run python -m voicelang_core.fast --transcriber whisper --model-arch small --source mic
+# true streaming multilingual
+uv run python -m voicelang_core.fast --transcriber moonshine --language en --source mic
+# per-app capture (needs Rust for true isolation; Python fallback is device-level honest)
+uv run python -m voicelang_core.fast --source app --source-app Discord.exe --transcriber whisper --model-arch tiny
+# deterministic file replay (this page's bench)
+uv run python -m voicelang_core.fast --input e2e_speech.wav --transcriber whisper --model-arch tiny
+uv run python -m voicelang_core.fast --input e2e_speech.wav --transcriber moonshine
+# original pipeline still works
+uv run python -m voicelang_core.run --input e2e_speech.wav --transcriber moonshine --display console
+uv run python -m voicelang_core.run --input e2e_speech.wav --transcriber whisper --display console
+</div>
+</div>
+
+<div class="card">
+<h2>Honest &lt;100 ms note</h2>
+<p>With the current 5 engines, <b>true &lt;100 ms mic→partial is not hit</b>. Closest is whisper tiny 59 ms decode + block. For 80 ms chunk, projected 80+40+11≈131 ms. To hit &lt;100 ms p50 you need a causal transducer (FastConformer 80 ms, Parakeet EOU 120M) which lives in <code>rust-asr-server</code> as <code>ModelType::Transducer via SherpaOnnxCreateOnlineRecognizer</code> — import it via <code>sherpa-onnx</code> OnlineRecognizer with greedy int8 intimately, or keep tiny whisper and accept ~130 ms. Moonshine's first partial 539 ms because it needs ~1 s of context to hypothesize. The Rust IAudioClient3 saves 240 ms on capture, not enough to bring moonshine to &lt;100 ms.</p>
+</div>
+
+</div>

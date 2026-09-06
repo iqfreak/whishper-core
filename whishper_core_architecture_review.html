@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Architecture review for whishper-core</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose" });
+    </script>
+    <style>
+      .seam { stroke-dasharray: 4 4; }
+      .leak { stroke: #dc2626; }
+      .deep { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 font-sans">
+    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+      <header class="space-y-4">
+        <h1 class="text-3xl font-serif font-semibold text-slate-900">Architecture deepening review</h1>
+        <p class="font-mono text-sm text-slate-500">whishper-core &middot; real-time transcribe+translate &middot; 2026-08-29</p>
+        <div class="flex flex-wrap gap-3 text-xs uppercase tracking-wider text-slate-600">
+          <span class="px-2 py-1 rounded bg-white border border-slate-200">solid box = module</span>
+          <span class="px-2 py-1 rounded bg-white border border-slate-200"><span class="seam-line border-t-2 border-dashed border-slate-400 inline-block w-6 align-middle"></span> dashed = seam</span>
+          <span class="px-2 py-1 rounded bg-white border border-red-300 text-red-700">red arrow = leakage</span>
+          <span class="px-2 py-1 rounded deep text-slate-100">thick dark box = deep module</span>
+        </div>
+        <p class="text-sm text-slate-600">
+          Four-port real-time pipeline spun out of the batch whishper review. Core imports only
+          stdlib + port types; every heavy dep lives in an adapter and is lazy-imported. Report
+          covers the seam shape, the two latent glue bugs found and fixed, and the one external
+          coupling still unverified.
+        </p>
+      </header>
+
+      <!-- ===== CANDIDATE 1: the 4-port seam ===== -->
+      <article class="space-y-6">
+        <div>
+          <h2 class="text-xl font-serif font-semibold">1 &middot; The four-port seam holds</h2>
+          <div class="mt-2 flex gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium">Strong</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span>
+          </div>
+        </div>
+        <p class="font-mono text-sm text-slate-600">ports.py &middot; pipeline.py &middot; types.py &middot; adapters/*</p>
+
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Dependency rule &mdash; as built</p>
+            <pre class="mermaid">
+flowchart LR
+  subgraph core["core (stdlib only)"]
+    T[types.py]
+    P[ports.py]
+    PL[pipeline.py]
+  end
+  A1[OpenASRSource] -.seam.-> C[CaptionSource]
+  A2[MicSource] -.seam.-> AS[AudioSource]
+  A3[WhisperStreamingTranscriber] -.seam.-> ST[StreamingTranscriber]
+  A4[PassthroughTranslator] -.seam.-> TR[Translator]
+  A5[OverlayDisplay] -.seam.-> D[Display]
+  C --> PL
+  AS --> PL
+  ST --> PL
+  TR --> PL
+  D --> PL
+  classDef seam stroke-dasharray:4 4;
+  class C,AS,ST,TR,D seam
+            </pre>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-slate-500 mb-2">Two compositions, never mixed</p>
+            <pre class="mermaid">
+flowchart LR
+  subgraph fused["fused path — run_captions"]
+    OS[OpenASRSource]
+    OS -->|emits Segment| PL1[pipeline]
+    PL1 --> D1[Display]
+  end
+  subgraph composed["composed path — run_streaming"]
+    SRC[AudioSource]
+    T2[StreamingTranscriber]
+    SRC --> PL2[pipeline]
+    T2 --> PL2
+    PL2 --> D2[Display]
+  end
+            </pre>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="font-medium text-slate-800">Problem</p>
+            <p class="text-slate-600">None at the seam level. The dependency rule is enforced: core never imports numpy/faster-whisper/sounddevice/requests/openasr.</p>
+          </div>
+          <div>
+            <p class="font-medium text-slate-800">Solution</p>
+            <p class="text-slate-600">Keep it. The seam is the load-bearing decision; everything below is an adapter behind it.</p>
+          </div>
+        </div>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">
+          <li>Locality: ASR/translate/UI changes stay inside one adapter each.</li>
+          <li>Leverage: one <code>Pipeline</code> interface, four engine call sites.</li>
+          <li>Tests hit fakes, so core runs numpy-only in ~0.4s (18 passed).</li>
+        </ul>
+      </article>
+
+      <!-- ===== CANDIDATE 2: engine factory glue ===== -->
+      <article class="space-y-6">
+        <div>
+          <h2 class="text-xl font-serif font-semibold">2 &middot; Engine factory: glue was broken for 3 of 4 engines</h2>
+          <div class="mt-2 flex gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium">Closed</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span>
+          </div>
+        </div>
+        <p class="font-mono text-sm text-slate-600">engines.py &middot; adapters/openasr_source.py &middot; adapters/remote_whisper.py &middot; adapters/whisper_streaming.py</p>
+
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="rounded-lg border border-red-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-red-600 mb-2">Before &mdash; factory imported non-existent modules</p>
+            <pre class="mermaid">
+flowchart LR
+  EF[build_pipeline] -->|openasr| O1[OpenASRSource device=?]
+  EF -->|faster-whisper| BAD1[&quot;faster_whisper_source&quot;]
+  EF -->|whisper-http| BAD2[&quot;remote_whisper&quot;]
+  BAD1 -.leak.-> X1[ModuleNotFoundError]
+  BAD2 -.leak.-> X2[ModuleNotFoundError]
+  O1 -.leak.-> X3[TypeError device=]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class BAD1,BAD2,O1 leak
+            </pre>
+          </div>
+          <div class="rounded-lg border border-emerald-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-emerald-600 mb-2">After &mdash; real adapters, both ports set</p>
+            <pre class="mermaid">
+flowchart LR
+  EF[build_pipeline] -->|openasr| O[OpenASRSource]
+  EF -->|faster-whisper| WS[WhisperStreaming + Mic]
+  EF -->|whisper-http| RW[RemoteWhisper + Mic/Loop]
+  EF -->|passthrough| FK[fakes]
+  O --> C[CaptionSource]
+  WS --> ST[StreamingTranscriber]
+  RW --> ST
+            </pre>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="font-medium text-slate-800">Problem</p>
+            <p class="text-slate-600">Original factory wired 3 of 4 engines to import names that did not exist on disk, and passed <code>device=</code> to a constructor that had no such param. The 9-test suite never called <code>build_pipeline</code>, so it stayed green while the glue was dead.</p>
+          </div>
+          <div>
+            <p class="font-medium text-slate-800">Solution</p>
+            <p class="text-slate-600">Rewrote <code>build_pipeline</code> to map to the actual adapters; created <code>adapters/remote_whisper.py</code>; added <code>device</code> to <code>OpenASRSource</code>; composed path sets <code>source</code> AND <code>transcriber</code>; <code>WhisperStreamingTranscriber</code> now implements the inherited <code>transcribe</code> (was abstract).</p>
+          </div>
+        </div>
+        <div class="rounded-lg border-l-4 border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
+          <span class="font-medium">ADR:</span> the composed path needs both ports on the Pipeline. A <code>TypeError</code> at <code>run_streaming</code> time (not construction) means a port was not set &mdash; the factory smoke test now asserts all four.
+        </div>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">
+          <li>All four engines build; <code>run_mode</code> asserted per engine (test_engines.py).</li>
+          <li>Deep: model registry keyed by <code>(model_size, device)</code> &mdash; loaded once per session.</li>
+          <li>Leak closed: translator no longer hardcoded; <code>_build_translator</code> honors the <code>translate</code> config.</li>
+        </ul>
+      </article>
+
+      <!-- ===== CANDIDATE 3: Display contract drift ===== -->
+      <article class="space-y-6">
+        <div>
+          <h2 class="text-xl font-serif font-semibold">3 &middot; Display contract: partials were dropped</h2>
+          <div class="mt-2 flex gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-emerald-100 text-emerald-800 font-medium">Closed</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span>
+          </div>
+        </div>
+        <p class="font-mono text-sm text-slate-600">ports.py:72 &middot; pipeline.py:71,84 &middot; adapters/console.py &middot; adapters/overlay.py</p>
+
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="rounded-lg border border-red-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-red-600 mb-2">Before &mdash; show_partial had no contract</p>
+            <pre class="mermaid">
+flowchart LR
+  PL[pipeline.run_captions] -->|show_partial| DS[Display]
+  DS -. default pass .-> VOID[(silently dropped)]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class VOID leak
+            </pre>
+          </div>
+          <div class="rounded-lg border border-emerald-200 bg-white p-4">
+            <p class="text-xs uppercase tracking-wider text-emerald-600 mb-2">After &mdash; show_partial is abstract</p>
+            <pre class="mermaid">
+flowchart LR
+  PL[pipeline] -->|show_partial| CD[ConsoleDisplay]
+  PL -->|show_partial| OD[OverlayDisplay]
+  CD --> PRE[print &quot;&hellip; text&quot;]
+  OD --> BUF[ring buffer + QLabel]
+            </pre>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="font-medium text-slate-800">Problem</p>
+            <p class="text-slate-600"><code>run_captions</code> calls <code>display.show_partial(seg)</code> on every partial, but the <code>Display</code> ABC only gave a default <code>pass</code>. Every live partial leaked into the void &mdash; no live preview. A missing override now fails at construction instead of silently dropping text.</p>
+          </div>
+          <div>
+            <p class="font-medium text-slate-800">Solution</p>
+            <p class="text-slate-600">Made <code>show_partial</code> abstract in <code>ports.py</code>; <code>ConsoleDisplay</code> prints the raw hypothesis; <code>OverlayDisplay</code> buffers it. Run-mode integration test asserts finals only cross the translator.</p>
+          </div>
+        </div>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">
+          <li>Locality: the live-preview concern now lives in one method per sink.</li>
+          <li>Partials never reach the translator &mdash; finals only (verified by test_run_modes).</li>
+          <li><code>OverlayDisplay</code> is a pure <code>Display</code> adapter: no raw audio, no ASR JSON.</li>
+        </ul>
+      </article>
+
+      <!-- ===== CANDIDATE 4: unverified external coupling ===== -->
+      <article class="space-y-6">
+        <div>
+          <h2 class="text-xl font-serif font-semibold">4 &middot; One external coupling still unverified</h2>
+          <div class="mt-2 flex gap-2 text-xs">
+            <span class="px-2 py-1 rounded bg-amber-100 text-amber-800 font-medium">Worth exploring</span>
+            <span class="px-2 py-1 rounded bg-slate-100 text-slate-700">local-substitutable</span>
+          </div>
+        </div>
+        <p class="font-mono text-sm text-slate-600">adapters/openasr_source.py:14-19, 74-94</p>
+
+        <div class="rounded-lg border border-slate-200 bg-white p-4">
+          <pre class="mermaid">
+flowchart LR
+  subgraph stable["contract-stable (verified)"]
+    LAUNCH[launch subprocess]
+    LIFE[lifecycle / stop]
+    STR[stream into Segments]
+    PL[pipeline]
+  end
+  subgraph unverified["UNVERIFIED — real openasr live output"]
+    PARSE[_parse_event]
+  end
+  LAUNCH --> STR --> PL
+  PARSE -. feeds .-> STR
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class PARSE leak
+          </pre>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4 text-sm">
+          <div>
+            <p class="font-medium text-slate-800">Problem</p>
+            <p class="text-slate-600"><code>_parse_event</code> is a DEFENSIVE HYPOTHESIS, not a verified contract: the OpenASR live JSON event shape is undocumented at the URLs checked (docs/http-api.md &rarr; 404; README documents <code>openasr live</code> + the OpenAI-compatible serve API, not the event format) and OpenASR is pre-v1. The parser tolerates plausible field names so a single real <code>openasr live --mic --stream json</code> run surfaces captions; it is the ONLY schema-coupled function. One real line from the user locks the shape.</p>
+          </div>
+          <div>
+            <p class="font-medium text-slate-800">Solution</p>
+            <p class="text-slate-600">Isolate, then validate. The risk is already contained: only <code>_parse_event</code> touches the schema. Install OpenASR, capture one real <code>openasr live --mic --stream json</code> session, and adjust that one function. Nothing else moves.</p>
+          </div>
+        </div>
+        <div class="rounded-lg border-l-4 border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
+          <span class="font-medium">ADR:</span> do not build UI on a guessed source seam. Validate <code>_parse_event</code> before promising OpenASR quality &mdash; the <code>Display</code> port is safe either way (it consumes <code>Translation</code>, never raw JSON).
+        </div>
+        <ul class="text-sm text-slate-700 space-y-1 list-disc pl-5">
+          <li>Locality: blast radius of a schema change is one function.</li>
+          <li>Leverage: capture path stable; only the parser is user-gated.</li>
+          <li><code>WASAPILoopbackSource</code> captures ALL system audio &mdash; not Discord-only (Depth B Rust embed, out of scope).</li>
+        </ul>
+      </article>
+
+      <!-- ===== TOP RECOMMENDATION ===== -->
+      <section id="top" class="space-y-4">
+        <h2 class="text-2xl font-serif font-semibold">Top recommendation</h2>
+        <div class="rounded-lg deep text-slate-100 p-6">
+          <p class="text-lg font-medium">Validate <code>_parse_event</code> with one real OpenASR run &mdash; then build the overlay UI on the stable seam.</p>
+          <p class="mt-2 text-sm text-slate-300">
+            The four-port architecture is sound and the glue is now honest (18 tests pass, all engines build). The single open risk is an external contract, not an internal one. Install OpenASR, capture one live session, fix the lone parser, then ship <code>OverlayDisplay</code> (Tier A: windowed/borderless + loopback; exclusive-fullscreen is a ban risk &mdash; out of scope).
+          </p>
+          <a href="#c4" class="text-sm underline decoration-slate-400">See candidate 4 &rarr;</a>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 border-t border-slate-200 pt-4">
+        Generated from live file:line evidence &middot; whishper-core &middot; companion to the batch whishper review (whishper_architecture_review.html)
+      </footer>
+    </main>
+  </body>
+</html>

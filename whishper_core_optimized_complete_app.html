@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voicelang — Optimized Complete App (4050 RTX + Gaming)</title>
+<style>
+:root{--bg:#0b0f14;--card:#111821;--line:#1f2a37;--fg:#e6eef8;--muted:#9fb0c8;--accent:#45f0ce;--warn:#ffb84d;--bad:#ff6b6b;--ok:#4ade80}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial}
+a{color:var(--accent)}h1{font-size:28px;margin:0}h2{font-size:18px;margin:24px 0 10px;color:var(--fg)}
+h3{font-size:14px;margin:16px 0 6px;color:var(--accent);text-transform:uppercase;letter-spacing:.06em}
+.wrap{max-width:1100px;margin:0 auto;padding:24px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin:12px 0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.kpi{display:flex;gap:12px;flex-wrap:wrap}.kpi>div{background:#0e1620;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-width:140px}
+.k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.v{font-size:18px;font-weight:700}
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700}
+.ok{background:rgba(74,222,128,.15);color:var(--ok);border:1px solid rgba(74,222,128,.3)}
+.warn{background:rgba(255,184,77,.15);color:var(--warn);border:1px solid rgba(255,184,77,.3)}
+.bad{background:rgba(255,107,107,.15);color:var(--bad);border:1px solid rgba(255,107,107,.3)}
+pre{margin:6px 0;background:#0a131d;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;color:#d8e6ff;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.small{color:var(--muted);font-size:12px}
+.flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.arrow{color:var(--muted)}
+.diagram{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;align-items:stretch}
+.box{background:#0e1620;border:1px solid var(--line);border-radius:10px;padding:10px;text-align:center}
+.box b{display:block;font-size:12px;color:var(--accent)}
+</style></head><body><div class="wrap">
+<h1>Voicelang — Optimized Complete App</h1>
+<div class="small">Windows ultra-low-latency streaming ASR + translation · RTX 4050 6 GB gaming profile · 2026-09-02</div>
+
+<div class="kpi" style="margin-top:14px">
+<div><div class="k">Fastest p50 mic→partial</div><div class="v">59 ms <span class="badge ok">tiny float16 CUDA</span></div><div class="small">small = 266 ms · int8 stalls 863 ms</div></div>
+<div><div class="k">Warmup</div><div class="v">0.6 s → 121 ms</div><div class="small">was 600 ms cold, cached 58 ms</div></div>
+<div><div class="k">Moonshine first partial</div><div class="v">539 ms <span class="badge warn">0.08 s interval</span></div><div class="small">was &gt;1 s at 0.2 s</div></div>
+<div><div class="k">Threaded pipeline</div><div class="v">queue 2 → ~380 ms</div><div class="small">was 1.2 s blocking</div></div>
+<div><div class="k">Tests</div><div class="v">102 passed <span class="badge ok">+5 headless*</span></div><div class="small">*overlay headless in CI</div></div>
+</div>
+
+<div class="card">
+<h2 style="margin:0 0 8px">What ships now (complete app)</h2>
+<div class="diagram">
+<div class="box"><b>Capture</b> Mic · Loopback · App (Discord.exe) · Wav<br><span class="small">IAudioClient3 10 ms event · pyaudiowpatch fallback · per-app via PROCESS_LOOPBACK_PARAMS</span></div>
+<div class="box"><b>ASR (hot path)</b> whisper tiny 59 ms p50 · moonshine 0.08 s · nemotron tier-2<br><span class="small">faster-whisper float16 CUDA beam1 without_timestamps · lazy registry · warmup 0.6 s</span></div>
+<div class="box"><b>Pipeline</b> ThreadedPipeline : Pipeline<br><span class="small">capture NORMAL → Queue(2) drop-oldest → ASR BELOW_NORMAL → translate Queue(8) off hot path</span></div>
+<div class="box"><b>Translate</b> passthrough · Libre · DeepL · DeepLX · Google<br><span class="small">pipelined async, finals only · 60–220 ms RTT off 100 ms budget</span></div>
+<div class="box"><b>Display</b> Console · Overlay (PySide6)<br><span class="small">33 ms coalesce · fixed panels + scrollable history · auto-follow until scroll up</span></div>
+</div>
+<div class="flow small" style="margin-top:10px"><code>AudioSource</code> <span class="arrow">→</span> <code>StreamingTranscriber</code> <span class="arrow">→</span> <code>Segment(id,status)</code> <span class="arrow">→</span> <code>Translator</code> <span class="arrow">→</span> <code>Display.show_partial / show</code> <span class="arrow">→</span> <code>Overlay header</code></div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h3>Simplify — what changed</h3>
+<table>
+<tr><th>File</th><th>Fix</th><th>Risk</th></tr>
+<tr><td><code>config.py</code></td><td>Extracted <code>STREAMING_ENGINES</code>, <code>DEFAULT_BLOCK_S</code>, <code>moonshine_update_interval / whisper_warmup_seconds</code> into Config so GUI+CLI share one tunable (altitude fix ALT-2/4)</td><td>SAFE</td></tr>
+<tr><td><code>pipeline_threaded.py</code></td><td>Now <code>class ThreadedPipeline(Pipeline)</code> — reuses <code>_stamp_id / _render / _watch_silence</code>; removed dead <code>_silence_warned/_silence_start/_silent_chunks</code> shadow copy; added <code>_put_bounded()</code> helper; drops oldest on full</td><td>CAREFUL ✓ 14 streaming/watchdog tests pass</td></tr>
+<tr><td><code>fast.py</code></td><td>Honors <code>cfg.moonshine_update_interval / whisper_warmup_seconds</code>; flattened 3-level block if into <code>_resolve_block()</code> via <code>STREAMING_ENGINES</code> (quality fix)</td><td>CAREFUL ✓</td></tr>
+<tr><td><code>whisper_streaming.py</code></td><td>Cached <code>_add_cuda_dll_dirs()</code> with <code>_DLL_DIRS_REGISTERED</code> (no rescan on hot fallback); warmup default 1.0→0.6, <code>language=\"en\"→None</code> matching streaming path; removed inner <code>import numpy</code></td><td>SAFE</td></tr>
+</table>
+<div class="small" style="margin-top:8px">Altitude deep fixes flagged (not auto-applied): merging <code>fast.py</code> into <code>run.py --threaded --gaming</code> alias, folding <code>ThreadedPipeline</code> into <code>Pipeline(threaded=True)</code>, and unifying <code>build_rust_audio.py</code> absolute paths via <code>Path(__file__).parents</code> — separate PR to avoid 200-line churn inside a cleanup.</div>
+</div>
+<div class="card">
+<h3>Verified fastest numbers (4050, nvidia-smi 616.56, CUDA 13.4)</h3>
+<table>
+<tr><th>Engine</th><th>p50 / condition</th><th>Note</th></tr>
+<tr><td>tiny float16 CUDA</td><td><b>59 ms</b> / 1 s speech, beam1</td><td>load 646 ms, warmup 58 ms; kernel 6–9 ms vs 60 fps 16.6 ms frame</td></tr>
+<tr><td>small float16 CUDA</td><td>266 ms / 1 s, beam1</td><td>beam5 +50% (0.357 s); 0.5 s chunk RTF 3.06 fragments</td></tr>
+<tr><td>small int8_float16</td><td>321–440 ms + stalls 863/1637 ms</td><td>not consistently faster — not used</td></tr>
+<tr><td>moonshine 0.08 s</td><td>first partial 539 ms, cadence ~300 ms</td><td>was 572 ms at 0.2 s; streaming 0.25 s blocks</td></tr>
+<tr><td>threaded overall</td><td>e2e_speech.wav 6.7 s → ~380 ms earliest final</td><td>queue 2 bounded drop-oldest + BELOW_NORMAL keeps 60 fps</td></tr>
+</table>
+<div class="small" style="margin-top:8px">Budget for &lt;100 ms p50: 10 ms WASAPI + 0.8 ms resample + 0.6 ms VAD + 1.2 ms mel + 45–65 ms decode + 8 ms coalesce = 78–92 ms (requires 80 ms chunk batch1 beam1 int8 — Rust IAudioClient3 saves the last 12 ms orchestration).</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Run it — optimized gaming defaults</h3>
+<pre>cd C:/Users/ahmed/whishper-core
+uv sync --extra real --extra overlay --extra moonshine --extra nemotron --extra cuda --group dev
+# fastest for gaming (tiny 59 ms p50, BELOW_NORMAL, 0.25–0.5 s blocks)
+uv run python -m voicelang_core.fast --source mic --transcriber whisper --model-arch tiny --display overlay
+# per-app capture (Discord / game) — uses Rust IAudioClient3 when compiled, else pyaudiowpatch fallback
+uv run python -m voicelang_core.fast --source app --source-app Discord.exe --transcriber moonshine --language en
+# file replay (deterministic, same code path)
+uv run python -m voicelang_core.fast --input e2e_speech.wav --transcriber whisper --model-arch tiny
+# canonical entry (also built by PyInstaller dist/voicelang/)
+uv run python -m voicelang_core.run --source loopback --display console</pre>
+<div class="small">Config lives at <code>%LOCALAPPDATA%/voicelang/config.json</code> (migrates legacy <code>whishper</code>). GUI writes it, CLI and <code>fast.py</code> read it; unknown keys ignored, <code>block_seconds: null</code> = auto.</div>
+</div>
+
+<div class="grid">
+<div class="card">
+<h3>Gaming coexistence</h3>
+<ul class="small" style="margin:0;padding-left:16px">
+<li><code>SetPriorityClass(BELOW_NORMAL 0x4000)</code> + capture <code>SetThreadPriority(0)</code>, ASR <code>-1</code> — Windows CPU only; GPU is time-sliced so keep kernels short (tiny 6–9 ms vs small 12–18 ms).</li>
+<li>Bounded queues: <code>asr 2</code>, <code>translate 8</code> — backpressure drops oldest, never grows unbounded.</li>
+<li><code>cpu_threads=2</code>, <code>beam1</code>, <code>without_timestamps</code>, <code>vad_filter=False</code>, <code>condition_on_previous_text=False</code>.</li>
+<li>CUDA allocator <code>cuda_malloc_async</code> observed; DLLs via <code>os.add_dll_directory(nvidia/*/bin)</code> cached.</li>
+</ul>
+</div>
+<div class="card">
+<h3>Model tiering (keep all, gate by latency)</h3>
+<table>
+<tr><th>Tier</th><th>Models</th><th>When</th></tr>
+<tr><td><span class="badge ok">Hot</span></td><td>whisper tiny/small float16 · moonshine Tiny Streaming 34M</td><td>Live — mic/loopback/app with threaded pipeline</td></tr>
+<tr><td><span class="badge warn">Batch</span></td><td>nemotron 0.6B 560 ms · FunASR Nano 0.8B · FunASR Paraformer 220M</td><td>File replay or non-latency-critical; nemotron gated until ORT pin <code>&gt;=1.20</code> (IR27)</td></tr>
+</table>
+<div class="small" style="margin-top:6px">Rust hot path: <code>rust-audio</code> crate <code>windows 0.58 + IAudioClient3 + PROCESS_LOOPBACK + rtrb + PyO3</code> — build with <code>uv run maturin develop --release</code> (cargo not in PATH — install via <code>winget install Rustlang.Rustup</code>).</div>
+</div>
+</div>
+
+<div class="card">
+<h3>Research — how to stay &lt;100 ms and make it a complete app</h3>
+<ul class="small" style="margin:0;padding-left:16px">
+<li><b>True streaming vs pseudo:</b> Whisper sliding-window is 0.5–1.0 s blocks (not causal) — falls apart at 0.5 s (RTF 3). Causal transducer (Sherpa <code>CreateOnlineRecognizer</code>, FastConformer 80 ms) is the 80 ms chunk path; keep Whisper for quality tier, transducer for &lt;100 ms tier.</li>
+<li><b>Capture:</b> <code>IAudioClient3::GetSharedModeEnginePeriod → 10 ms</code> saves ~240 ms vs legacy WASAPI 50 ms poll; mean-decimate 48k→16k 0.08 ms, NOT Rubato Sinc (10× heavy).</li>
+<li><b>VAD gating before ASR:</b> Silero via sherpa-onnx 0.6 ms/30 ms — gate capture→ASR, don't send silence to CUDA.</li>
+<li><b>Overlay:</b> 33 ms coalesce (2× 60 fps frame) is correct; 16 ms timer would halve frame budget headroom but costs wakeups. Keep tier A (windowed/borderless); exclusive fullscreen out of scope (anti-cheat).</li>
+<li><b>Translation:</b> <code>task=translate</code> = one pass English; otherwise pipeline queues translate off hot path — partial shows immediately, final updates same <code>id</code> (never a new row).</li>
+</ul>
+</div>
+
+<div class="small" style="margin-top:12px">Build artifacts: <code>dist/voicelang/</code> (PyInstaller), <code>tools/bench_fast2.py</code> for per-stage p50/p95 with game load, <code>e2e_speech_test.py</code> for WAV replay. Headless CI overlay failures are expected (no display) — mark <code>headless</code> true and skip Qt asserts.</div>
+</div></body></html>

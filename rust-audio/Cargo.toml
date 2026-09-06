@@ -1,0 +1,15 @@
+[package]
+name = "voicelang-audio"
+version = "0.1.0"
+edition = "2021"
+description = "Windows IAudioClient3 + PROCESS_LOOPBACK low-latency capture for voicelang"
+license = "MIT"
+
+[lib]
+name = "voicelang_audio"
+crate-type = ["cdylib"]
+
+[dependencies]
+windows = { version = "0.58", features = ["Win32_Media_Audio", "Win32_Foundation", "Win32_System_Com", "Win32_System_Threading"] }
+pyo3 = { version = "0.22", features = ["extension-module"] }
+rtrb = "0.3"

@@ -1,0 +1,57 @@
+[project]
+name = "voicelang"
+version = "0.1.0"
+description = "Streaming capture->transcribe->translate core with ports; reusable for a Discord bot or a game overlay."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+real = [
+    "faster-whisper",   # Transcriber adapter
+    "requests",         # LibreTranslate / DeepL / DeepLX / Google adapters
+    "sounddevice",      # Microphone source adapter
+    "pyaudiowpatch",    # WASAPI loopback (game/Discord audio) source adapter
+    "pycaw",            # Per-app audio session enumeration (Discord-like picker)
+    "comtypes",         # COM bindings for Core Audio (per-app capture)
+    "psutil",           # Process name -> PID resolution
+    "numpy",
+]
+# Transparent overlay window (Tier A: windowed/borderless only).
+overlay = ["PySide6"]
+# End-to-end demo (e2e_speech_test.py): SAPI TTS + high-quality resampling.
+e2e = ["pywin32", "librosa"]
+# Fun-ASR-Nano 0.8B (zh/zh-cn/en/ja) via HF Transformers PR #46180 build
+# (see https://huggingface.co/FunAudioLLM/Fun-ASR-Nano-2512-hf).
+funasr-nano = [
+    "torch",
+    "transformers @ https://github.com/huggingface/transformers/archive/aa0a25a4c55a70cff996267bcd7e96317fe4031c.zip",
+    "accelerate",
+    "librosa",
+]
+# Nemotron-3.5-ASR-Streaming int8 ONNX runtime (see adapters/nemotron.py).
+# onnxruntime>=1.20 is REQUIRED: sherpa-onnx-core bundles 1.17.1, which cannot
+# load mid-2026 ONNX exports (IR/API 27); the adapter registers the pip ORT
+# DLL dir so the newer runtime wins.
+nemotron = ["sherpa-onnx", "onnxruntime>=1.20"]
+# CUDA compute DLLs for faster-whisper/ctranslate2 -- no system CUDA toolkit
+# needed; the adapter registers these dirs via os.add_dll_directory.
+cuda = ["nvidia-cublas-cu12", "nvidia-cuda-runtime-cu12", "nvidia-cudnn-cu12"]
+# Per-language tiny streaming ASR (Moonshine Voice; see adapters/moonshine.py).
+moonshine = ["moonshine-voice"]
+# Vosk offline streaming ASR (small models, CPU-only, no torch).
+# requests+tqdm+filelock are needed for model download; numpy is core dep.
+vosk = ["vosk", "requests", "tqdm", "filelock"]
+# FunASR streaming ASR (Paraformer / SenseVoice, modelscope).
+funasr = ["funasr", "modelscope", "torch", "torchaudio", "soundfile"]
+
+[dependency-groups]
+dev = ["pytest", "pyinstaller"]
+
+[tool.setuptools]
+packages = ["voicelang_core"]
+
+[tool.setuptools.package-data]
+voicelang_core = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -1,0 +1,26 @@
+# Mini-plan: Overlay Not Appearing — Root Cause Hunt
+
+## 1) Root cause hypotheses (ranked)
+- **H1: Worker PySide6 missing / headless fallback silent (MAIN)**: `OverlayDisplay` falls back to headless when `PySide6` import fails. `run.py:_build_display` used to raise `SystemExit` which was swallowed (child exit invisible in GUI until Agent7's stderr->log). If worker venv lacks PySide6 (e.g. installed via `uv sync` without `--extra overlay`), construction never reaches `w.show()` — `headless=True` and process exits silently or with code 1 but GUI showed no toast/log tail until recently. The display console default in current config.json (`display: console`) suggests user never actually requested overlay, or GUI failed to persist `overlay` choice.
+- **H2: Config display kind not overlay**: Default `Config.display="console"`. If `cfg.display != "overlay"` then `_build_display` never constructs overlay at all. Check `config.json` and CLI/GUI wiring.
+- **H3: Geometry off-screen / zero size**: `OverlayConfig(x,y,width,height)` with manual values could be off-screen (negative x/y, huge width, zero height). GUI spinbox allows x/y -10000..10000, width 100..5000. Auto-place flag not respected by `run.py` (always passes concrete values), but `_geometry` in overlay.py uses `None` sentinel for auto; concrete values could still be off-screen.
+- **H4: Opacity / visibility flags**: `opacity 0.0-0.1` nearly transparent, `max_lines 0` empty, `show_*_block` both false => empty window. Window flags `FramelessWindowHint|WindowStaysOnTopHint|Tool` + `WA_TranslucentBackground` + `setWindowOpacity` could be rejected on headless/offscreen or without compositor, making window invisible or behind.
+- **H5: Event loop not pumped**: `Pipeline.run_streaming` pumps via `_pump`, `ThreadedPipeline._capture_loop` pumps via `_pump_display`. If pipeline blocks without pumping, coalesce timer never fires, `_render` never paints, so window exists but never shows captions (appears empty).
+
+## 2) How verify it's the real cause
+- **H1**: Run with project venv (has PySide6) vs hermes venv (no PySide6). Import `OverlayDisplay(headless=False)` offscreen (`QT_QPA_PLATFORM=offscreen`) and check `headless`, `isVisible`/`_window`. Run `C:/.../.venv/python -m voicelang_core.run --source wav --input e2e_speech.wav --display overlay` with missing dep simulation (monkeypatch import failure) and capture exit code + stderr tail + log file. Verify GUI `_poll_proc` surfaces toast/status/log.
+- **H2**: Inspect `AppData/Local/voicelang/config.json` `display` field; compare `load_config` default vs GUI `_display` currentText; simulate start with display=console and assert overlay not requested.
+- **H3**: Create `OverlayDisplay(x=-5000,y=-5000,width=0,height=0)` offscreen, assert geometry clamped or not visible. Try `x=100,y=50,width=800,height=160` (current) and assert within `availableGeometry`.
+- **H4**: Test opacity 0.0, 0.1, 0.85; check `windowOpacity()`; test both blocks hidden.
+- **H5**: Launch `Pipeline`+`OverlayDisplay(offscreen)` with fake source/transcriber, push `show`/`show_partial`, pump events, assert `_left_lines/_right_lines` and `headless` vs window visible.
+
+## 3) Concrete fix plan
+- **A. Loud failure (meta-bug)**: In `run.py:_build_display`, catch headless and raise distinct exit code (e.g. 30) with message including remediation and log path. In `gui.py:_poll_proc`, map 30 -> "overlay unavailable — install PySide6 / check display server" and always show status+toast+QMessageBox+log tail. Also add **pre-flight** in GUI ` _start_run ` : `OverlayDisplay(headless=False, offscreen probe)` or `importlib.util.find_spec("PySide6")` check BEFORE Popen; if missing, surface immediate error without launching worker.
+- **B. Config defaults hardening**: In `overlay.py:_try_build_window`, clamp `opacity` to [0.15,1.0], `width` [320, 2000], `height` [80,800], and if auto_place else validate coords inside `availableGeometry` (fallback to bottom-center if off-screen). In `config.py:OverlayConfig`, ensure opacity not <0.15, dimensions sane on load.
+- **C. Ensure construction reached**: Add debug log `overlay: constructing window geom=... headless=...` to `run.log` and GUI status before `w.show()`.
+- **D. Don't revert Agent7**: Keep Popen `stderr=log_file errors=replace`, early poll 400/1200ms, translate pre-flight.
+
+## 4) How prove fix works
+- **Repro failing test**: `tests/test_overlay_not_appearing.py` — `test_overlay_constructs_offscreen` (geometry+headless), `test_overlay_visibility_clamped`, `test_missing_pyside_loud_failure` (monkeypatch PySide6 missing -> assert SystemExit 30 and headless, then GUI preflight returns visible error), `test_overlay_live_captions_offscreen` (pipeline + overlay offscreen, push segment, assert lines + history), `test_config_defaults_visible`.
+- **E2E**: `QT_QPA_PLATFORM=offscreen python -m voicelang_core.run --source wav --input e2e_speech.wav --display overlay --transcriber passthrough` → assert exit 0, captions, overlay not headless when offscreen. Also live check: `.venv/python - <<` constructs OverlayDisplay and `isVisible()` is True within 500ms.
+- **GUI loud failure**: Simulate missing PySide6 in worker, launch via gui preflight, assert status `color: #F87171` + toast emitted + log tail contains remediation.
